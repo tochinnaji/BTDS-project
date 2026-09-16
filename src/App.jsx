@@ -7,10 +7,13 @@ import IconChevronDown from '@tabler/icons-react/dist/esm/icons/IconChevronDown.
 import IconCircleCheck from '@tabler/icons-react/dist/esm/icons/IconCircleCheck.mjs'
 import IconCode from '@tabler/icons-react/dist/esm/icons/IconCode.mjs'
 import IconCopy from '@tabler/icons-react/dist/esm/icons/IconCopy.mjs'
+import IconEye from '@tabler/icons-react/dist/esm/icons/IconEye.mjs'
+import IconEyeOff from '@tabler/icons-react/dist/esm/icons/IconEyeOff.mjs'
 import IconHelpCircle from '@tabler/icons-react/dist/esm/icons/IconHelpCircle.mjs'
 import IconKey from '@tabler/icons-react/dist/esm/icons/IconKey.mjs'
 import IconListDetails from '@tabler/icons-react/dist/esm/icons/IconListDetails.mjs'
 import IconLogout from '@tabler/icons-react/dist/esm/icons/IconLogout.mjs'
+import IconMenu2 from '@tabler/icons-react/dist/esm/icons/IconMenu2.mjs'
 import IconPlus from '@tabler/icons-react/dist/esm/icons/IconPlus.mjs'
 import IconPlayerPause from '@tabler/icons-react/dist/esm/icons/IconPlayerPause.mjs'
 import IconPlayerPlay from '@tabler/icons-react/dist/esm/icons/IconPlayerPlay.mjs'
@@ -22,6 +25,7 @@ import IconSettings from '@tabler/icons-react/dist/esm/icons/IconSettings.mjs'
 import IconShieldCheck from '@tabler/icons-react/dist/esm/icons/IconShieldCheck.mjs'
 import IconTerminal2 from '@tabler/icons-react/dist/esm/icons/IconTerminal2.mjs'
 import IconTrash from '@tabler/icons-react/dist/esm/icons/IconTrash.mjs'
+import IconUsers from '@tabler/icons-react/dist/esm/icons/IconUsers.mjs'
 import IconX from '@tabler/icons-react/dist/esm/icons/IconX.mjs'
 import './App.css'
 import './Wdc.css'
@@ -66,7 +70,11 @@ function App() {
   const [endpoints, setEndpoints] = useState([])
   const [events, setEvents] = useState([])
   const [apiKeys, setApiKeys] = useState([])
+  const [team, setTeam] = useState(null)
+  const [securityAlerts, setSecurityAlerts] = useState([])
   const [workspace, setWorkspace] = useState(null)
+  const [workspaces, setWorkspaces] = useState([])
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
   const [selected, setSelected] = useState(null)
   const [filter, setFilter] = useState('All')
   const [appId, setAppId] = useState(null)
@@ -77,11 +85,15 @@ function App() {
   const [showKeyForm, setShowKeyForm] = useState(false)
   const [apiKeyName, setApiKeyName] = useState('')
   const [newApiKey, setNewApiKey] = useState('')
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteLink, setInviteLink] = useState('')
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const [endpointForm, setEndpointForm] = useState({ name: '', url: '', signingSecret: '' })
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [showNotifications, setShowNotifications] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const filteredDeliveries = useMemo(() => filter === 'All' ? deliveries : deliveries.filter((item) => item.status === filter), [deliveries, filter])
   const deliveredCount = deliveries.filter((item) => item.status === 'Delivered').length
@@ -92,24 +104,31 @@ function App() {
     return fetch(`${API}${path}`, { ...options, headers })
   }
 
-  async function loadData() {
-    const appsResponse = await apiFetch('/apps?slug=tkc-foods')
+  async function loadData(preferredWorkspaceId = activeWorkspaceId) {
+    const appsResponse = await apiFetch('/apps')
     if (appsResponse.status === 401) throw new Error('SESSION_EXPIRED')
     const apps = await appsResponse.json()
-    if (!apps[0]) throw new Error('No workspace is available for this account.')
-    setWorkspace(apps[0])
-    setAppId(apps[0].id)
-    const [deliveryRows, endpointRows, eventRows, apiKeyRows] = await Promise.all([
-      apiFetch(`/deliveries?appId=${apps[0].id}`).then((response) => response.json()),
-      apiFetch(`/endpoints?appId=${apps[0].id}`).then((response) => response.json()),
-      apiFetch(`/events?appId=${apps[0].id}`).then((response) => response.json()),
-      apiFetch(`/apps/${apps[0].id}/api-keys`).then((response) => response.json()),
+    const activeWorkspace = apps.find((workspace) => workspace.id === preferredWorkspaceId) || apps.find((workspace) => workspace.slug === 'tkc-foods') || apps[0]
+    if (!activeWorkspace) throw new Error('No workspace is available for this account.')
+    setWorkspace(activeWorkspace)
+    setWorkspaces(apps)
+    setActiveWorkspaceId(activeWorkspace.id)
+    setAppId(activeWorkspace.id)
+    const [deliveryRows, endpointRows, eventRows, apiKeyRows, teamResult, alertsResult] = await Promise.all([
+      apiFetch(`/deliveries?appId=${activeWorkspace.id}`).then((response) => response.json()),
+      apiFetch(`/endpoints?appId=${activeWorkspace.id}`).then((response) => response.json()),
+      apiFetch(`/events?appId=${activeWorkspace.id}`).then((response) => response.json()),
+      apiFetch(`/apps/${activeWorkspace.id}/api-keys`).then((response) => response.json()),
+      apiFetch(`/apps/${activeWorkspace.id}/team`).then((response) => response.ok ? response.json() : null),
+      apiFetch(`/apps/${activeWorkspace.id}/security-alerts`).then((response) => response.ok ? response.json() : []),
     ])
     const formatted = deliveryRows.map(displayDelivery)
     setDeliveries(formatted)
     setEndpoints(endpointRows)
     setEvents(eventRows)
     setApiKeys(apiKeyRows)
+    setTeam(teamResult)
+    setSecurityAlerts(alertsResult)
     setSelected((current) => formatted.find((item) => item.id === current?.id) || formatted[0] || null)
   }
 
@@ -128,11 +147,22 @@ function App() {
     const timeoutId = window.setTimeout(() => setNotice(''), 3500)
     return () => window.clearTimeout(timeoutId)
   }, [notice])
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
+  }, [mobileMenuOpen])
 
   async function authenticate(mode, form) {
     const response = await fetch(`${API}/auth/${mode}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(form) })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Unable to authenticate.')
+    if (form.inviteToken) {
+      const inviteResponse = await fetch(`${API}/invitations/accept`, { method: 'POST', headers: { authorization: `Bearer ${result.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ token: form.inviteToken }) })
+      const inviteResult = await inviteResponse.json()
+      if (!inviteResponse.ok) throw new Error(inviteResult.error || 'Unable to accept the invitation.')
+    }
     localStorage.setItem('wdc_session', result.token); setUser(result.user); setAuthToken(result.token)
   }
 
@@ -234,6 +264,55 @@ function App() {
     await loadData(); setNotice(`${key.name} was revoked.`)
   }
 
+  async function rotateApiKey(key) {
+    const response = await apiFetch(`/api-keys/${key.id}/rotate`, { method: 'POST' })
+    const result = await response.json()
+    if (!response.ok) return setError(result.error || 'Unable to rotate API key.')
+    setNewApiKey(result.apiKey)
+    await loadData()
+    setNotice('Replacement key created. Update your app, then revoke the old key.')
+  }
+
+  async function createInvite(form) {
+    const response = await apiFetch(`/apps/${appId}/invitations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(form) })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Unable to create invitation.')
+    setShowInvite(false)
+    if (result.emailed) setNotice('Invitation email sent.')
+    else setInviteLink(result.inviteUrl || `${window.location.origin}/#invite=${result.inviteToken}`)
+    await loadData()
+  }
+
+  async function updateMemberRole(member, role) {
+    const response = await apiFetch(`/apps/${appId}/members/${member.user_id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role }) })
+    const result = await response.json()
+    if (!response.ok) return setError(result.error || 'Unable to update the staff role.')
+    await loadData(); setNotice(`${member.name} is now a ${role}.`)
+  }
+
+  async function removeMember(member) {
+    if (!window.confirm(`Remove ${member.name}'s access to this workspace?`)) return
+    const response = await apiFetch(`/apps/${appId}/members/${member.user_id}`, { method: 'DELETE' })
+    if (!response.ok) return setError((await response.json()).error || 'Unable to remove staff access.')
+    await loadData(); setNotice(`${member.name}'s access was removed.`)
+  }
+
+  async function createWorkspace(form) {
+    const slug = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `workspace-${Date.now()}`
+    const response = await apiFetch('/apps', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: form.name, slug }) })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Unable to create workspace.')
+    setActiveWorkspaceId(result.id); setView('deliveries'); await loadData(result.id); setNotice(`${result.name} workspace created.`)
+  }
+
+  async function selectWorkspace(nextWorkspace) {
+    setWorkspaceMenuOpen(false)
+    setMobileMenuOpen(false)
+    setActiveWorkspaceId(nextWorkspace.id)
+    await loadData(nextWorkspace.id)
+    setNotice(`Switched to ${nextWorkspace.name}.`)
+  }
+
   async function retry(delivery = selected) {
     if (!delivery) return
     const response = await apiFetch(`/deliveries/${delivery.id}/retry`, { method: 'POST' })
@@ -249,31 +328,35 @@ function App() {
   }
 
   const navItems = [
-    ['deliveries', 'Deliveries', IconActivity], ['events', 'Events', IconListDetails], ['endpoints', 'Endpoints', IconPlugConnected], ['api-keys', 'API Keys', IconKey], ['verify', 'Verify', IconShieldCheck], ['logs', 'Logs', IconTerminal2],
+    ['deliveries', 'Deliveries', IconActivity], ['events', 'Events', IconListDetails], ['endpoints', 'Endpoints', IconPlugConnected], ['api-keys', 'API Keys', IconKey], ['verify', 'Verify', IconShieldCheck], ['security', 'Security', IconAlertCircle], ['team', 'Team', IconUsers], ['logs', 'Logs', IconTerminal2],
   ]
 
   if (!authReady) return <main className="auth-page"><div className="auth-loading">Loading Webhookly...</div></main>
   if (!user) return <AuthScreen onAuthenticate={authenticate} />
 
   return <main className="app-shell">
-    <aside className="sidebar">
+    {mobileMenuOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileMenuOpen(false)} aria-label="Close navigation" />}
+    <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><span className="brand-mark">w</span><span>webhookly</span></div>
-      <button className="workspace"><span className="workspace-dot" />TKC Foods <IconChevronDown {...iconProps} /></button>
-      <nav aria-label="Main navigation">{navItems.map(([id, label, Icon]) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => setView(id)} aria-label={label} title={label}><Icon {...iconProps} /><span>{label}</span></button>)}</nav>
-      <div className="sidebar-bottom"><button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} aria-label="Settings" title="Settings"><IconSettings {...iconProps} /><span>Settings</span></button><div className="user"><div className="avatar">{user.name.slice(0, 2).toUpperCase()}</div><div><strong>{user.name}</strong><small>Owner</small></div><button className="logout-button" onClick={logout} aria-label="Sign out" title="Sign out"><IconLogout {...iconProps} /></button></div></div>
+      <div className="workspace-switcher"><button className="workspace" onClick={() => setWorkspaceMenuOpen((open) => !open)} aria-expanded={workspaceMenuOpen} aria-haspopup="menu"><span className="workspace-dot" />{workspace?.name || 'Workspace'} <IconChevronDown {...iconProps} /></button>{workspaceMenuOpen && <div className="workspace-menu" role="menu">{workspaces.map((item) => <button key={item.id} className={item.id === appId ? 'workspace-choice active' : 'workspace-choice'} onClick={() => selectWorkspace(item)} role="menuitem">{item.name}{item.id === appId && <IconCheck {...iconProps} />}</button>)}<button className="workspace-create" onClick={() => { setWorkspaceMenuOpen(false); setView('new-workspace'); setMobileMenuOpen(false) }} role="menuitem"><IconPlus {...iconProps} /> Create new workspace</button></div>}</div>
+      <nav aria-label="Main navigation">{navItems.map(([id, label, Icon]) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => { setView(id); setMobileMenuOpen(false) }} aria-label={label} title={label}><Icon {...iconProps} /><span>{label}</span></button>)}</nav>
+      <div className="sidebar-bottom"><button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => { setView('settings'); setMobileMenuOpen(false) }} aria-label="Settings" title="Settings"><IconSettings {...iconProps} /><span>Settings</span></button><div className="user"><div className="avatar">{user.name.slice(0, 2).toUpperCase()}</div><div><strong>{user.name}</strong><small>Owner</small></div><button className="logout-button" onClick={logout} aria-label="Sign out" title="Sign out"><IconLogout {...iconProps} /></button></div></div>
     </aside>
 
     <section className="content">
-      <header className="topbar"><div className="crumb">Workspace <b>/</b><strong>{view[0].toUpperCase() + view.slice(1)}</strong></div><div className="top-actions"><button className="icon-button top-action" aria-label="Notifications" title="Notifications" onClick={() => { setShowNotifications((visible) => !visible); setShowHelp(false) }}><IconBell {...iconProps} /></button><button className="icon-button top-action" aria-label="Help" title="Help" onClick={() => { setShowHelp((visible) => !visible); setShowNotifications(false) }}><IconHelpCircle {...iconProps} /></button><TopPopover type={showNotifications ? 'notifications' : showHelp ? 'help' : null} deliveries={deliveries} onClose={() => { setShowNotifications(false); setShowHelp(false) }} /></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="mobile-menu-button" onClick={() => setMobileMenuOpen(true)} aria-label="Open navigation" title="Navigation"><IconMenu2 {...iconProps} /></button><div className="crumb">Workspace <b>/</b><strong>{view[0].toUpperCase() + view.slice(1)}</strong></div></div><div className="top-actions"><button className="icon-button top-action" aria-label="Notifications" title="Notifications" onClick={() => { setShowNotifications((visible) => !visible); setShowHelp(false) }}><IconBell {...iconProps} /></button><button className="icon-button top-action" aria-label="Help" title="Help" onClick={() => { setShowHelp((visible) => !visible); setShowNotifications(false) }}><IconHelpCircle {...iconProps} /></button><TopPopover type={showNotifications ? 'notifications' : showHelp ? 'help' : null} deliveries={deliveries} onClose={() => { setShowNotifications(false); setShowHelp(false) }} /></div></header>
       {notice && <div className="toast"><IconCircleCheck {...iconProps} />{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><IconX {...iconProps} /></button></div>}
       {error && <div className="toast error-toast"><IconAlertCircle {...iconProps} />{error}<button onClick={() => setError('')} aria-label="Dismiss error"><IconX {...iconProps} /></button></div>}
       {view === 'deliveries' && <DeliveriesView deliveries={filteredDeliveries} selected={selected} setSelected={setSelected} filter={filter} setFilter={setFilter} deliveredCount={deliveredCount} onSend={() => setShowEvent(true)} onRetry={retry} />}
       {view === 'endpoints' && <EndpointsView endpoints={endpoints} onAdd={() => { setEditingEndpoint(null); setEndpointForm({ name: '', url: '', signingSecret: '' }); setShowEndpoint(true) }} onToggle={toggleEndpoint} onEdit={openEditEndpoint} onDelete={deleteEndpoint} onCreateFailure={createFailureDemo} />}
-      {view === 'api-keys' && <ApiKeysView apiKeys={apiKeys} onCreate={() => setShowKeyForm(true)} onRevoke={revokeApiKey} />}
+      {view === 'api-keys' && <ApiKeysView apiKeys={apiKeys} onCreate={() => setShowKeyForm(true)} onRevoke={revokeApiKey} onRotate={rotateApiKey} />}
       {view === 'verify' && <SignatureGuideView />}
+      {view === 'security' && <SecurityView alerts={securityAlerts} />}
+      {view === 'team' && <TeamView team={team} onInvite={() => setShowInvite(true)} onUpdateRole={updateMemberRole} onRemoveMember={removeMember} />}
       {view === 'events' && <EventsView events={events} onSend={() => setShowEvent(true)} />}
       {view === 'logs' && <LogsView deliveries={deliveries} />}
       {view === 'settings' && <SettingsView workspace={workspace} endpointCount={endpoints.length} onSave={saveWorkspace} />}
+      {view === 'new-workspace' && <NewWorkspaceView onCreate={createWorkspace} onCancel={() => setView('deliveries')} />}
     </section>
 
     {view === 'deliveries' && <DeliveryDetail selected={selected} onRetry={retry} />}
@@ -281,21 +364,45 @@ function App() {
     {showEndpoint && <EndpointModal form={endpointForm} setForm={setEndpointForm} editing={editingEndpoint} onClose={() => { setShowEndpoint(false); setEditingEndpoint(null) }} onSubmit={editingEndpoint ? updateEndpoint : addEndpoint} />}
     {showKeyForm && <ApiKeyModal name={apiKeyName} setName={setApiKeyName} onClose={() => setShowKeyForm(false)} onSubmit={createApiKey} />}
     {newApiKey && <NewApiKeyModal apiKey={newApiKey} onClose={() => setNewApiKey('')} />}
+    {showInvite && <InviteModal onClose={() => setShowInvite(false)} onSubmit={createInvite} />}
+    {inviteLink && <InviteLinkModal inviteLink={inviteLink} onClose={() => setInviteLink('')} />}
   </main>
 }
 
 function AuthScreen({ onAuthenticate }) {
-  const [mode, setMode] = useState('signup')
-  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const hashParams = new URLSearchParams(window.location.hash.slice(1))
+  const inviteToken = hashParams.get('invite') || ''
+  const emailedResetToken = hashParams.get('reset') || ''
+  const [mode, setMode] = useState(emailedResetToken ? 'reset-confirm' : 'signup')
+  const [form, setForm] = useState({ name: '', email: '', password: '', inviteToken })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [resetToken, setResetToken] = useState(emailedResetToken)
+  const [showPassword, setShowPassword] = useState(false)
   const update = (field) => (event) => setForm({ ...form, [field]: event.target.value })
   async function submit(event) {
     event.preventDefault(); setError(''); setSubmitting(true)
-    try { await onAuthenticate(mode, form) } catch (authError) { setError(authError.message) } finally { setSubmitting(false) }
+    try {
+      if (mode === 'reset-request') {
+        const response = await fetch(`${API}/auth/password-reset/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: form.email }) })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Unable to prepare a reset link.')
+        if (result.resetToken) { setResetToken(result.resetToken); setMode('reset-confirm') } else setMode('reset-sent')
+      } else if (mode === 'reset-confirm') {
+        const response = await fetch(`${API}/auth/password-reset/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: resetToken, password: form.password }) })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Unable to reset password.')
+        window.history.replaceState(null, '', window.location.pathname)
+        setMode('login'); setForm({ ...form, password: '' }); setResetToken('')
+      } else await onAuthenticate(mode, form)
+    } catch (authError) { setError(authError.message) } finally { setSubmitting(false) }
   }
   const isSignup = mode === 'signup'
-  return <main className="auth-page"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark">w</span><strong>webhookly</strong></div><p className="eyebrow">{isSignup ? 'CREATE YOUR WORKSPACE' : 'WELCOME BACK'}</p><h1>{isSignup ? 'Start sending reliable webhooks.' : 'Sign in to Webhookly.'}</h1><p className="auth-copy">{isSignup ? 'Deliver every important event with signed requests, clear delivery logs, and automatic retries when systems are unavailable.' : 'Use your owner account to manage your webhook workspace.'}</p><form onSubmit={submit} className="auth-form">{isSignup && <label>Full name<input required value={form.name} onChange={update('name')} placeholder="e.g. Amara Okafor" autoComplete="name" /></label>}<label>Email address<input required type="email" value={form.email} onChange={update('email')} placeholder="you@example.com" autoComplete="email" /></label><label>Password<input required type="password" minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label>{error && <p className="auth-error"><IconAlertCircle {...iconProps} />{error}</p>}<button className="primary-button wide" disabled={submitting} type="submit">{submitting ? 'Please wait...' : isSignup ? 'Create account' : 'Sign in'}</button></form><button className="auth-switch" onClick={() => { setMode(isSignup ? 'login' : 'signup'); setError('') }}>{isSignup ? 'Already have an account? Sign in' : 'New to Webhookly? Create an account'}</button></section></main>
+  const isReset = mode.startsWith('reset')
+  const title = mode === 'reset-sent' ? 'Check your inbox.' : mode === 'reset-request' ? 'Reset your password.' : mode === 'reset-confirm' ? 'Choose a new password.' : isSignup ? 'Start sending reliable webhooks.' : 'Sign in to Webhookly.'
+  const description = mode === 'reset-sent' ? 'If that email belongs to a Webhookly account, a secure reset link is on its way.' : mode === 'reset-request' ? 'Enter your email and we will prepare a secure reset link.' : mode === 'reset-confirm' ? 'Create a new password with at least 8 characters.' : isSignup ? 'Deliver every important event with signed requests, clear delivery logs, and automatic retries when systems are unavailable.' : 'Step back into your command center for reliable, secure event delivery.'
+  const showForm = mode !== 'reset-sent'
+  return <main className="auth-page"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark">w</span><strong>webhookly</strong></div><p className="eyebrow">{isReset ? 'ACCOUNT RECOVERY' : isSignup ? 'CREATE YOUR WORKSPACE' : 'WELCOME BACK'}</p><h1>{title}</h1><p className="auth-copy">{description}</p>{inviteToken && !isReset && <p className="invite-banner">You have been invited to join a WDC workspace. Create an account or sign in with the invited email.</p>}{showForm && <form onSubmit={submit} className="auth-form">{isSignup && <label>Full name<input required value={form.name} onChange={update('name')} placeholder="e.g. Amara Okafor" autoComplete="name" /></label>}{mode !== 'reset-confirm' && <label>Email address<input required type="email" value={form.email} onChange={update('email')} placeholder="you@example.com" autoComplete="email" /></label>}{mode !== 'reset-request' && <label>Password<span className="password-input"><input required type={showPassword ? 'text' : 'password'} minLength="8" value={form.password} onChange={update('password')} placeholder="At least 8 characters" autoComplete={isSignup || mode === 'reset-confirm' ? 'new-password' : 'current-password'} /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} title={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <IconEyeOff {...iconProps} /> : <IconEye {...iconProps} />}</button></span></label>}{mode === 'reset-confirm' && !resetToken && <p className="auth-error"><IconAlertCircle {...iconProps} />This reset link is missing or invalid. Request a new one.</p>}{error && <p className="auth-error"><IconAlertCircle {...iconProps} />{error}</p>}<button className="primary-button wide" disabled={submitting || (mode === 'reset-confirm' && !resetToken)} type="submit">{submitting ? 'Please wait...' : mode === 'reset-request' ? 'Send reset link' : mode === 'reset-confirm' ? 'Update password' : isSignup ? 'Create account' : 'Sign in'}</button></form>}{mode === 'login' && <button className="auth-switch" onClick={() => { setMode('reset-request'); setError('') }}>Forgot your password?</button>}{isReset ? <button className="auth-switch" onClick={() => { setMode('login'); setError('') }}>Back to sign in</button> : <button className="auth-switch" onClick={() => { setMode(isSignup ? 'login' : 'signup'); setError('') }}>{isSignup ? 'Already have an account? Sign in' : 'New to Webhookly? Create an account'}</button>}</section></main>
 }
 
 function DeliveriesView({ deliveries, selected, setSelected, filter, setFilter, deliveredCount, onSend, onRetry }) {
@@ -310,8 +417,19 @@ function EndpointsView({ endpoints, onAdd, onToggle, onEdit, onDelete, onCreateF
   return <section className="endpoints-view"><div className="page-head"><div><p className="eyebrow">DESTINATIONS</p><h1>Endpoints</h1><p className="subhead">Choose where Webhookly should send your events.</p></div><button className="primary-button" onClick={onAdd}><IconPlus {...iconProps} /> Add endpoint</button></div><div className="test-mode-bar"><div><strong>Retry test mode</strong><span>Add a receiver that always returns 503 so you can inspect pending retries.</span></div><button className="test-mode-button" onClick={onCreateFailure}><IconAlertCircle {...iconProps} /> Add failing receiver</button></div><div className="endpoint-list">{endpoints.map((endpoint) => <article className="endpoint-row" key={endpoint.id}><div className="endpoint-icon"><IconSend {...iconProps} /></div><div className="endpoint-main"><div className="endpoint-name"><strong>{endpoint.name}</strong><span className={endpoint.is_active ? 'endpoint-live' : 'endpoint-paused'}>{endpoint.is_active ? 'Active' : 'Paused'}</span></div><code>{endpoint.url}</code><small>{endpoint.delivery_count} deliveries {endpoint.failed_count ? `- ${endpoint.failed_count} failed` : ''}</small></div><div className="endpoint-controls"><button className="icon-button endpoint-action" onClick={() => onEdit(endpoint)} aria-label={`Edit ${endpoint.name}`} title="Edit endpoint"><IconPencil {...iconProps} /></button><button className="icon-button endpoint-action" onClick={() => onToggle(endpoint)} aria-label={`${endpoint.is_active ? 'Pause' : 'Activate'} ${endpoint.name}`} title={endpoint.is_active ? 'Pause endpoint' : 'Activate endpoint'}>{endpoint.is_active ? <IconPlayerPause {...iconProps} /> : <IconPlayerPlay {...iconProps} />}</button><button className="icon-button endpoint-action delete-endpoint" onClick={() => onDelete(endpoint)} aria-label={`Remove ${endpoint.name}`} title="Remove endpoint"><IconTrash {...iconProps} /></button></div></article>)}</div>{!endpoints.length && <div className="blank-endpoints"><IconSend size={34} stroke={1.4} /><h2>Connect your first endpoint</h2><p>Add a URL where Webhookly can send events from TKC Foods.</p><button className="primary-button" onClick={onAdd}><IconPlus {...iconProps} /> Add endpoint</button></div>}</section>
 }
 
-function ApiKeysView({ apiKeys, onCreate, onRevoke }) {
-  return <section className="resource-view"><div className="page-head"><div><p className="eyebrow">AUTHENTICATION</p><h1>API Keys</h1><p className="subhead">Use a key to let your app securely send events into Webhookly.</p></div><button className="primary-button" onClick={onCreate}><IconPlus {...iconProps} /> Create API key</button></div><div className="api-key-list">{apiKeys.map((key) => <article className="api-key-row" key={key.id}><span className="api-key-icon"><IconKey {...iconProps} /></span><div><strong>{key.name}</strong><code>{key.key_prefix}...</code><small>{key.last_used_at ? `Last used ${new Date(key.last_used_at).toLocaleString()}` : 'Never used'}</small></div>{key.revoked_at ? <span className="endpoint-paused">Revoked</span> : <button className="revoke-button" onClick={() => onRevoke(key)}>Revoke</button>}</article>)}</div>{!apiKeys.length && <EmptyResource icon={IconKey} title="No API keys yet" body="Create a key to let TKC Foods send secure events into WDC." action={onCreate} label="Create API key" />}</section>
+function ApiKeysView({ apiKeys, onCreate, onRevoke, onRotate }) {
+  return <section className="resource-view"><div className="page-head"><div><p className="eyebrow">AUTHENTICATION</p><h1>API Keys</h1><p className="subhead">Use a key to let your app securely send events into Webhookly.</p></div><button className="primary-button" onClick={onCreate}><IconPlus {...iconProps} /> Create API key</button></div><div className="ingestion-note"><IconShieldCheck {...iconProps} /><span>External events require a Bearer key, a timestamp no older than 5 minutes, and an idempotency key. Each key is limited to 60 events per minute.</span></div><div className="api-key-list">{apiKeys.map((key) => <article className="api-key-row" key={key.id}><span className="api-key-icon"><IconKey {...iconProps} /></span><div><strong>{key.name}</strong><code>{key.key_prefix}...</code><small>{key.rotation_started_at ? 'Replacement created. Revoke this key after your app is updated.' : key.last_used_at ? `Last used ${new Date(key.last_used_at).toLocaleString()}` : 'Never used'}</small></div>{key.revoked_at ? <span className="endpoint-paused">Revoked</span> : <div className="key-actions"><button className="rotate-button" onClick={() => onRotate(key)}>Rotate</button><button className="revoke-button" onClick={() => onRevoke(key)}>Revoke</button></div>}</article>)}</div>{!apiKeys.length && <EmptyResource icon={IconKey} title="No API keys yet" body="Create a key to let TKC Foods send secure events into WDC." action={onCreate} label="Create API key" />}</section>
+}
+
+function TeamView({ team, onInvite, onUpdateRole, onRemoveMember }) {
+  if (!team) return <section className="resource-view"><div className="empty-state">Loading team...</div></section>
+  const canManage = ['owner', 'admin'].includes(team.role)
+  const isOwner = team.role === 'owner'
+  return <section className="resource-view"><div className="page-head"><div><p className="eyebrow">WORKSPACE ACCESS</p><h1>Team</h1><p className="subhead">Invite people and choose the access they need.</p></div>{canManage && <button className="primary-button" onClick={onInvite}><IconPlus {...iconProps} /> Invite member</button>}</div><div className="team-list">{team.members.map((member) => <article className="team-row" key={member.id}><span className="member-avatar">{member.name.slice(0, 2).toUpperCase()}</span><div><strong>{member.name}</strong><small>{member.email}</small></div>{isOwner && member.role !== 'owner' ? <div className="member-actions"><select value={member.role} onChange={(event) => onUpdateRole(member, event.target.value)} aria-label={`Role for ${member.name}`}><option value="admin">Admin</option><option value="developer">Developer</option><option value="viewer">Viewer</option></select><button className="icon-button delete-endpoint" onClick={() => onRemoveMember(member)} aria-label={`Remove access for ${member.name}`} title="Remove access"><IconTrash {...iconProps} /></button></div> : <span className={`role-badge ${member.role}`}>{member.role}</span>}</article>)}</div>{canManage && <><div className="team-section-label">PENDING INVITATIONS</div><div className="team-list">{team.invitations.length ? team.invitations.map((invite) => <article className="team-row" key={invite.id}><span className="member-avatar pending">?</span><div><strong>{invite.email}</strong><small>Expires {new Date(invite.expires_at).toLocaleDateString()}</small></div><span className={`role-badge ${invite.role}`}>{invite.role}</span></article>) : <p className="team-empty">No pending invitations.</p>}</div></>}</section>
+}
+
+function SecurityView({ alerts }) {
+  return <section className="resource-view"><div className="page-head"><div><p className="eyebrow">SECURITY CENTER</p><h1>Security alerts</h1><p className="subhead">Review key activity and suspicious requests for this workspace.</p></div></div><div className="security-list">{alerts.map((alert) => <article className="security-row" key={alert.id}><span className="security-icon"><IconAlertCircle {...iconProps} /></span><div><strong>{alert.title}</strong><p>{alert.detail}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div></article>)}</div>{!alerts.length && <EmptyResource icon={IconShieldCheck} title="No security alerts" body="WDC will record rate-limit, replay, revoked-key, rotation, and team-access activity here." />}</section>
 }
 
 function SignatureGuideView() {
@@ -335,6 +453,8 @@ function SettingsView({ workspace, endpointCount, onSave }) {
   return <section className="resource-view settings-view"><div className="page-head"><div><p className="eyebrow">WORKSPACE</p><h1>Settings</h1><p className="subhead">Manage your Webhookly workspace and integration details.</p></div></div><form className="settings-section" onSubmit={(event) => { event.preventDefault(); onSave(name) }}><div><h2>Workspace details</h2><p>Change the name shown across your dashboard.</p></div><label>Workspace name<input value={name} onChange={(event) => setName(event.target.value)} required /></label><button className="primary-button" type="submit"><IconCheck {...iconProps} /> Save changes</button></form><section className="settings-section integration-summary"><div><h2>Integration summary</h2><p>Your demo app is ready to receive and deliver events.</p></div><div className="settings-facts"><span><IconPlugConnected {...iconProps} /> {endpointCount} active endpoint{endpointCount === 1 ? '' : 's'}</span><span><IconShieldCheck {...iconProps} /> Signed webhook requests</span><span><IconCode {...iconProps} /> PostgreSQL connected</span></div></section></section>
 }
 
+function NewWorkspaceView({ onCreate, onCancel }) { const [name, setName] = useState(''); const [error, setError] = useState(''); const [submitting, setSubmitting] = useState(false); return <section className="resource-view new-workspace-view"><div className="page-head"><div><p className="eyebrow">NEW WORKSPACE</p><h1>Register your company</h1><p className="subhead">Give each company its own apps, endpoints, API keys, deliveries, and staff.</p></div></div><form className="settings-section" onSubmit={async (event) => { event.preventDefault(); setError(''); setSubmitting(true); try { await onCreate({ name }) } catch (workspaceError) { setError(workspaceError.message) } finally { setSubmitting(false) } }}><div><h2>Company details</h2><p>Use the name your team will recognize in the workspace switcher.</p></div><label>Company or workspace name<input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Acme Payments" /></label>{error && <p className="auth-error new-workspace-error"><IconAlertCircle {...iconProps} />{error}</p>}<div className="workspace-page-actions"><button className="primary-button" disabled={submitting} type="submit"><IconPlus {...iconProps} /> {submitting ? 'Creating workspace...' : 'Create workspace'}</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div></form></section> }
+
 function EmptyResource({ icon: Icon, title, body, action, label }) { return <div className="resource-empty"><Icon size={33} stroke={1.4} /><h2>{title}</h2><p>{body}</p>{action && <button className="primary-button" onClick={action}><IconPlus {...iconProps} /> {label}</button>}</div> }
 
 function TopPopover({ type, deliveries, onClose }) {
@@ -354,6 +474,10 @@ function EndpointModal({ form, setForm, editing, onClose, onSubmit }) { const up
 
 function ApiKeyModal({ name, setName, onClose, onSubmit }) { return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={onSubmit}><button type="button" className="modal-close" onClick={onClose} aria-label="Close"><IconX {...iconProps} /></button><p className="eyebrow">NEW API KEY</p><h2>Name this key</h2><p>Use a descriptive name so you know which system uses it.</p><label>Key name<input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. TKC Foods production" /></label><button className="primary-button wide" type="submit"><IconKey {...iconProps} /> Create key</button></form></div> }
 
-function NewApiKeyModal({ apiKey, onClose }) { return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><IconX {...iconProps} /></button><p className="eyebrow">COPY THIS NOW</p><h2>Your API key is ready</h2><p>This is the only time WDC will show the full key.</p><code className="new-api-key">{apiKey}</code><button className="primary-button wide" onClick={() => navigator.clipboard.writeText(apiKey)}><IconCopy {...iconProps} /> Copy API key</button></div></div> }
+function NewApiKeyModal({ apiKey, onClose }) { const [copied, setCopied] = useState(false); async function copyKey() { await navigator.clipboard.writeText(apiKey); setCopied(true) } return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><IconX {...iconProps} /></button><p className="eyebrow">COPY THIS NOW</p><h2>Your API key is ready</h2><p>This is the only time WDC will show the full key.</p><code className="new-api-key">{apiKey}</code><button className="primary-button wide" onClick={copyKey}>{copied ? <IconCheck {...iconProps} /> : <IconCopy {...iconProps} />} {copied ? 'API key copied' : 'Copy API key'}</button></div></div> }
+
+function InviteModal({ onClose, onSubmit }) { const [email, setEmail] = useState(''); const [role, setRole] = useState('developer'); const [error, setError] = useState(''); return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={async (event) => { event.preventDefault(); try { await onSubmit({ email, role }) } catch (inviteError) { setError(inviteError.message) } }}><button type="button" className="modal-close" onClick={onClose} aria-label="Close"><IconX {...iconProps} /></button><p className="eyebrow">INVITE MEMBER</p><h2>Give someone access</h2><p>They will use the invitation link with this email address.</p><label>Email address<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="staff@company.com" /></label><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="admin">Admin</option><option value="developer">Developer</option><option value="viewer">Viewer</option></select></label>{error && <p className="auth-error"><IconAlertCircle {...iconProps} />{error}</p>}<button className="primary-button wide" type="submit"><IconUsers {...iconProps} /> Create invitation</button></form></div> }
+
+function InviteLinkModal({ inviteLink, onClose }) { const [copied, setCopied] = useState(false); async function copyLink() { await navigator.clipboard.writeText(inviteLink); setCopied(true) } return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><IconX {...iconProps} /></button><p className="eyebrow">INVITATION READY</p><h2>Share this link securely</h2><p>The invitation expires in 7 days and works only for the invited email address.</p><code className="new-api-key">{inviteLink}</code><button className="primary-button wide" onClick={copyLink}>{copied ? <IconCheck {...iconProps} /> : <IconCopy {...iconProps} />} {copied ? 'Link copied' : 'Copy invitation link'}</button></div></div> }
 
 export default App

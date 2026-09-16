@@ -3,7 +3,7 @@ import { pool } from './db.js'
 
 const sessionLifetimeMs = 7 * 24 * 60 * 60 * 1000
 
-const hashValue = (value) => crypto.createHash('sha256').update(value).digest('hex')
+export const hashValue = (value) => crypto.createHash('sha256').update(value).digest('hex')
 const deriveKey = (password, salt) => new Promise((resolve, reject) => {
   crypto.scrypt(password, salt, 64, (error, key) => error ? reject(error) : resolve(key))
 })
@@ -54,4 +54,14 @@ export async function requireAuth(req, res, next) {
 
 export async function removeSession(sessionId) {
   await pool.query('delete from sessions where id = $1', [sessionId])
+}
+
+export async function createPasswordReset(userId) {
+  const token = `wdc_reset_${crypto.randomBytes(32).toString('hex')}`
+  await pool.query('delete from password_resets where user_id = $1', [userId])
+  await pool.query(
+    'insert into password_resets (user_id, token_hash, expires_at) values ($1, $2, $3)',
+    [userId, hashValue(token), new Date(Date.now() + 30 * 60 * 1000)],
+  )
+  return token
 }
